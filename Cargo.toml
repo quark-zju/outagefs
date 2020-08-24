@@ -1,0 +1,26 @@
+[package]
+name = "recordfs"
+version = "0.1.0"
+edition = "2018"
+authors = ["Jun Wu <quark@lihdd.net>"]
+edition = "2018"
+license = "MIT"
+description = "FUSE Filesystem to record and replay changes intended to emulate power failures."
+keywords = ["fuse"]
+repository = "https://github.com/quark-zju/recordfs"
+categories = ["filesystem"]
+readme = "README.md"
+
+[dependencies]
+byteorder = "1"
+env_logger = "0.7"
+fuse = { git = "https://github.com/zargony/rust-fuse", rev = "42e29d964e2b24e32e21b179b77e4d0d0a0857ac" }
+libc = "0.2"
+log = "0.4"
+rand = "0.7"
+serde_bytes = "0.11"
+serde = { version = "1", features = ["derive"] }
+shell-words = "1"
+structopt = { version = "0.3", default-features = false }
+tempfile = "3"
+varbincode = "0.1"
