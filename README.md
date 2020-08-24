@@ -128,6 +128,9 @@ for f in $(recordfs gen-tests); do
 done
 ```
 
+Tips
+----
+
 ### More Challenging Tests
 
 The tests above might be not challenging enough. For example, individual writes
@@ -145,3 +148,18 @@ The `changes` file will be updated with the rewritten result.  Note that the
 internal filesystem state can break more easily. It's likely to see some tests
 erroring out at the `mount` command. It's also easier to trigger some errors
 like `EUCLEAN` or hangs.
+
+
+### Convenient Way to Run Tests
+
+It is verbose and error-prone to setup, record, and run tests manually.
+The `run-script` subcommand can be use to make it easier:
+
+```bash
+recordfs run-suite --sudo suite-examples/rename-no-fsync-ext2.py
+```
+
+The above command will create a temporary directory, call the script with
+`prepare` to create the `base` image, then `changes` to make changes to record,
+and eventually `verify` to verify test cases. After testing, the temporary
+directory is deleted.

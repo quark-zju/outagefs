@@ -65,9 +65,12 @@ impl Journal {
 
     /// Dump state to a directory.
     pub fn dump(&self, base_path: &Path, changes_path: &Path) -> io::Result<()> {
-        fs::write(base_path, &*self.initial_data)?;
+        if fs::read(base_path).ok().as_ref() != Some(&*self.initial_data) {
+            fs::write(base_path, &*self.initial_data).context(base_path.display())?;
+        }
         if !self.changes.is_empty() || changes_path.exists() {
-            fs::write(changes_path, varbincode::serialize(&self.changes).unwrap())?;
+            fs::write(changes_path, varbincode::serialize(&self.changes).unwrap())
+                .context(changes_path.display())?;
         }
         Ok(())
     }

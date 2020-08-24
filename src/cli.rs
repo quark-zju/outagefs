@@ -7,11 +7,14 @@ use rand::Rng;
 use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::process::ExitStatus;
 use structopt::StructOpt;
+use tempfile::tempdir;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Clone, StructOpt)]
 struct PathOpt {
     /// Path to the "base" image
     #[structopt(short, long)]
@@ -24,7 +27,7 @@ struct PathOpt {
     changes: PathBuf,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Default, StructOpt)]
 struct FilterOpt {
     /// Filter out certain changes
     ///
@@ -51,6 +54,50 @@ struct MutateOpt {
     zero_fill: bool,
 }
 
+#[derive(Debug, Clone, StructOpt)]
+struct RunOpt {
+    /// Whether to use 'sudo' to run the command
+    #[structopt(long)]
+    sudo: bool,
+}
+
+#[derive(Debug, Clone, StructOpt)]
+struct GenTestsOpt {
+    /// Log(Maximum test cases generated between 2 Syncs) / Log(2)
+    #[structopt(short, long)]
+    #[structopt(default_value = "8")]
+    max_cases_log2: usize,
+}
+
+#[derive(Debug, StructOpt)]
+struct MountOpt {
+    #[structopt(flatten)]
+    paths: PathOpt,
+
+    #[structopt(flatten)]
+    filter: FilterOpt,
+
+    #[structopt(flatten)]
+    run: RunOpt,
+
+    /// FUSE mount options
+    #[structopt(long)]
+    fuse_args: Vec<String>,
+
+    /// Whether to record changes back to disk.
+    #[structopt(short, long)]
+    record: bool,
+
+    /// Shell command to run with the mount path as $1
+    #[structopt(short, long)]
+    exec: Option<String>,
+
+    /// Mount destination
+    #[structopt(short, long)]
+    #[structopt(default_value = "./mountpoint")]
+    dest: PathBuf,
+}
+
 #[derive(Debug, StructOpt)]
 enum Opt {
     /// Mounts image and record changes
@@ -59,31 +106,7 @@ enum Opt {
     /// With --exec, the process will unmount after executing the command.
     Mount {
         #[structopt(flatten)]
-        paths: PathOpt,
-
-        #[structopt(flatten)]
-        filter: FilterOpt,
-
-        /// FUSE mount options
-        #[structopt(long)]
-        fuse_args: Vec<String>,
-
-        /// Whether to record changes back to disk.
-        #[structopt(short, long)]
-        record: bool,
-
-        /// Shell command to run with the mount path as $1
-        #[structopt(short, long)]
-        exec: Option<String>,
-
-        /// Whether to use 'sudo' to run the command
-        #[structopt(long)]
-        sudo: bool,
-
-        /// Mount destination
-        #[structopt(short, long)]
-        #[structopt(default_value = "./mountpoint")]
-        dest: PathBuf,
+        opts: MountOpt,
     },
 
     /// Merges changes into base image
@@ -119,10 +142,39 @@ enum Opt {
         #[structopt(flatten)]
         paths: PathOpt,
 
-        /// Log(Maximum test cases generated between 2 Syncs) / Log(2)
+        #[structopt(flatten)]
+        test: GenTestsOpt,
+    },
+
+    /// Run a test suite script
+    ///
+    /// The script will receive `argv[1]` telling it what to do:
+    ///
+    /// * prepare: Prepare the initial filesystem. Output to `argv[2]`.
+    ///
+    /// * changes: Make changes that will be recorded. Input is `argv[2]`.
+    ///
+    /// * verify: Check properties. Input is `argv[2]`. Return value in 10..20
+    /// are considered as "successful", and are used to "bisect" test cases.
+    ///
+    /// If the script returns non-zero exit code, and is not in the 10..20
+    /// range, then verification stops and prints the test case.
+    ///
+    /// The input and output files are created in a temporary directory
+    /// that will be deleted unless `--keep` is set.
+    RunSuite {
+        /// Script to run
+        script_path: PathBuf,
+
+        /// Whether to keep the temporary directory
         #[structopt(short, long)]
-        #[structopt(default_value = "8")]
-        max_cases_log2: usize,
+        keep: bool,
+
+        #[structopt(flatten)]
+        run: RunOpt,
+
+        #[structopt(flatten)]
+        test: GenTestsOpt,
     },
 }
 
@@ -217,7 +269,10 @@ fn show_changes(changes: &[Change], verbose: bool) {
     }
 }
 
-fn gen_tests(mut changes: Vec<Change>, max_width: usize) {
+fn gen_tests(mut changes: Vec<Change>, opt: &GenTestsOpt) -> Vec<String> {
+    let max_width: usize = opt.max_cases_log2;
+    let mut result = Vec::new();
+
     // Ensure the last change is Sync.
     if let Some(Change::Write { .. }) = changes.last() {
         changes.push(Change::Sync);
@@ -242,7 +297,7 @@ fn gen_tests(mut changes: Vec<Change>, max_width: usize) {
                 width, sync_index,
             );
             for bits in 0..(1 << width) {
-                println!("{}:{:0width$b}", start_index, bits, width = width);
+                result.push(format!("{}:{:0width$b}", start_index, bits, width = width));
             }
         } else {
             let n = 1 << max_width;
@@ -265,11 +320,13 @@ fn gen_tests(mut changes: Vec<Change>, max_width: usize) {
                     .collect::<Vec<&str>>()
                     .concat();
                 if visited.insert(bits_str.clone()) {
-                    println!("{}:{}", start_index, bits_str);
+                    result.push(format!("{}:{}", start_index, bits_str));
                 }
             }
         }
     }
+
+    result
 }
 
 fn wait_stdin() {
@@ -278,60 +335,202 @@ fn wait_stdin() {
     let _ = stdin.read_line(&mut s);
 }
 
+fn execute(mut args: Vec<String>, run: &RunOpt) -> io::Result<ExitStatus> {
+    if run.sudo {
+        args.insert(0, "/bin/sudo".to_string());
+    }
+    info!("running: {}", shell_words::join(&args[..]));
+    Command::new(&args[0])
+        .args(&args[1..])
+        .status()
+        .context("run script")
+}
+
+fn mount(opts: MountOpt) -> io::Result<i32> {
+    let MountOpt {
+        paths,
+        fuse_args,
+        dest,
+        filter,
+        exec,
+        run,
+        record,
+    } = opts;
+
+    let mut result = 0;
+    let mut journal = load_journal(&paths)?;
+    let filter = parse_filter(&filter)?;
+    // Create the file if it does not exist.
+    let _ = fs::OpenOptions::new().write(true).create(true).open(&dest);
+    let session = journal
+        .mount(&dest, &fuse_args, filter.as_ref())
+        .context(format!("mounting recordfs to {}", dest.display()))?;
+    info!("mounted: {}", dest.display());
+    match exec {
+        Some(cmd) => {
+            let sh_args = vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                cmd.clone(),
+                "--".to_string(),
+                dest.display().to_string(),
+            ];
+            let status = execute(sh_args, &run)?;
+            if let Some(code) = status.code() {
+                result = code;
+                info!("child exited with {}", code);
+            }
+        }
+        None => {
+            info!("press ENTER to write changes and unmount");
+            wait_stdin();
+        }
+    }
+    drop(session);
+    info!("unmounted: {}", dest.display());
+    if record {
+        save_journal(&journal, &paths)?;
+        info!("changes written: {}", paths.changes.display());
+    }
+    Ok(result)
+}
+
+fn run_script(script_path: &str, run: &RunOpt, test: &GenTestsOpt) -> io::Result<i32> {
+    // Prepare
+    let paths = PathOpt {
+        base: "base".into(),
+        changes: "changes".into(),
+    };
+    execute(
+        vec![
+            script_path.to_string(),
+            "prepare".into(),
+            paths.base.display().to_string(),
+        ],
+        &run,
+    )
+    .context("executing prepare script")?;
+
+    // Record changes
+    let dest = Path::new("mountpoint").to_path_buf();
+    mount(MountOpt {
+        paths: paths.clone(),
+        filter: FilterOpt::default(),
+        fuse_args: Vec::new(),
+        run: run.clone(),
+        record: true,
+        exec: Some(shell_words::join(vec![
+            script_path.to_string(),
+            "changes".to_string(),
+            dest.display().to_string(),
+        ])),
+        dest: dest.clone(),
+    })
+    .context("runing mount subcommand to record changes")?;
+
+    // Tests
+    let journal = load_journal(&paths)?;
+    let tests = gen_tests(journal.changes, test);
+    let total = tests.len();
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[repr(u8)]
+    enum Tested {
+        Unknown,
+        Pass(usize),
+    }
+    let mut tested = vec![Tested::Unknown; tests.len()];
+    let mut tested_count = 0;
+    let mut next_test_index = 0;
+    while tested_count < tests.len() {
+        let i = next_test_index;
+        tested_count += 1;
+        assert_eq!(tested[i], Tested::Unknown);
+        eprintln!("[{} of {}] Test Case #{}", tested_count, total, i);
+        let code = mount(MountOpt {
+            paths: paths.clone(),
+            filter: FilterOpt {
+                filter: tests[i].clone(),
+            },
+            fuse_args: Vec::new(),
+            run: run.clone(),
+            record: false,
+            exec: Some(shell_words::join(vec![
+                script_path.to_string(),
+                "verify".into(),
+                dest.display().to_string(),
+            ])),
+            dest: dest.clone(),
+        })
+        .context(format!("runing mount subcommand to verify {}", &tests[i]))?;
+        info!("verify script returned {}", code);
+        if code >= 10 && code < 20 {
+            tested[i] = Tested::Pass((code - 10) as _);
+        } else if code == 0 {
+            tested[i] = Tested::Pass(0);
+        } else {
+            eprintln!("verify script returned {} for filter {}", code, &tests[i]);
+            return Ok(code);
+        }
+
+        if tested_count >= tests.len() {
+            break;
+        }
+
+        // Find the next "interesting" test.
+        next_test_index = if i == 0 {
+            tests.len() - 1
+        } else {
+            // Find a bisect range.
+            let mut best_range_start = 0;
+            let mut best_range_distance = 0;
+            let mut last_pass_start = 0;
+            let mut last_pass_variant = 0;
+            for j in 0..tests.len() {
+                match tested[j] {
+                    Tested::Unknown => continue,
+                    Tested::Pass(v) => {
+                        if v != last_pass_variant && j - last_pass_start > best_range_distance {
+                            best_range_distance = j - last_pass_start;
+                            best_range_start = last_pass_start;
+                        }
+                        last_pass_start = j;
+                        last_pass_variant = v;
+                    }
+                }
+            }
+            let best_range_end = best_range_start + best_range_distance;
+            let best_range_mid = (best_range_end + best_range_start) / 2;
+            if best_range_distance > 1 {
+                info!(
+                    "bisect {}..{}: {}",
+                    best_range_start, best_range_end, best_range_mid
+                );
+                best_range_mid
+            } else {
+                let mut j = (i + 1) % tests.len();
+                let mut count = 0;
+                while tested[j] != Tested::Unknown {
+                    j += 1;
+                    count += 1;
+                    assert!(count <= tests.len());
+                    if j >= tests.len() {
+                        j = 0;
+                    }
+                }
+                info!("picking next untested case: {}", j);
+                j
+            }
+        };
+    }
+    eprintln!("{} test cases verified", tested_count);
+    Ok(0)
+}
+
 pub(crate) fn main() -> io::Result<()> {
     let opt = Opt::from_args();
     match opt {
-        Opt::Mount {
-            paths,
-            fuse_args,
-            dest,
-            filter,
-            exec,
-            sudo,
-            record,
-        } => {
-            let mut journal = load_journal(&paths)?;
-            let filter = parse_filter(&filter)?;
-            // Create the file if it does not exist.
-            let _ = fs::OpenOptions::new().write(true).create(true).open(&dest);
-            let session = journal
-                .mount(&dest, &fuse_args, filter.as_ref())
-                .context(format!("mounting recordfs to {}", dest.display()))?;
-            info!("mounted: {}", dest.display());
-            match exec {
-                Some(cmd) => {
-                    let mut args = vec![
-                        "/bin/sh".into(),
-                        "-c".into(),
-                        cmd.clone(),
-                        "--".into(),
-                        dest.display().to_string(),
-                    ];
-                    if sudo {
-                        args.insert(0, "/bin/sudo".into());
-                    }
-                    info!("running: {}", shell_words::join(&args[..]));
-
-                    let mut child = Command::new(&args[0])
-                        .args(&args[1..])
-                        .spawn()
-                        .context("spawning")?;
-                    let status = child.wait().context("waiting child")?;
-                    if let Some(code) = status.code() {
-                        info!("child exited with {}", code);
-                    }
-                }
-                None => {
-                    info!("press ENTER to write changes and unmount");
-                    wait_stdin();
-                }
-            }
-            drop(session);
-            info!("unmounted: {}", dest.display());
-            if record {
-                journal.dump(&paths.base, &paths.changes)?;
-                info!("changes written: {}", paths.changes.display());
-            }
+        Opt::Mount { opts } => {
+            mount(opts)?;
         }
         Opt::Merge { paths, filter } => {
             let journal = load_journal(&paths)?;
@@ -349,12 +548,27 @@ pub(crate) fn main() -> io::Result<()> {
             let journal = load_journal(&paths)?;
             show_changes(&journal.changes, verbose);
         }
-        Opt::GenTests {
-            paths,
-            max_cases_log2,
-        } => {
+        Opt::GenTests { paths, test } => {
             let journal = load_journal(&paths)?;
-            gen_tests(journal.changes, max_cases_log2);
+            for s in gen_tests(journal.changes, &test) {
+                println!("{}", s);
+            }
+        }
+        Opt::RunSuite {
+            script_path,
+            keep,
+            run,
+            test,
+        } => {
+            let script_path = script_path.canonicalize()?.display().to_string();
+            let tmpdir = tempdir()?;
+            let dir = &tmpdir.path();
+            info!("chdir: {}", dir.display());
+            std::env::set_current_dir(dir)?;
+            let _code = run_script(&script_path, &run, &test)?;
+            if keep {
+                eprintln!("keep tmpdir: {}", tmpdir.into_path().display());
+            }
         }
     }
     Ok(())
