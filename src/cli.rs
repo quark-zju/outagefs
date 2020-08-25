@@ -337,7 +337,7 @@ fn wait_stdin() {
 }
 
 fn execute(mut args: Vec<String>, run: &RunOpt) -> io::Result<ExitStatus> {
-    if run.sudo {
+    if run.sudo && unsafe { libc::getuid() } != 0 {
         let mut sudo_path = None;
         for path in &["/usr/bin/sudo", "/run/wrappers/bin/sudo"] {
             if Path::new(path).exists() {

@@ -1,5 +1,6 @@
 use crate::errors::Context;
 use crate::vendor::fuse;
+use log::debug;
 use serde::Deserialize;
 use serde::Serialize;
 use std::ffi::OsStr;
@@ -106,7 +107,8 @@ impl Journal {
         let data = self.data(filter);
         let fs = crate::fs::FuseOutageFilesystem::new(data, &mut self.changes);
         // Add '-o allow_root' automatically.
-        let fixed_opts = if opts.contains(&"allow_other".to_string()) {
+        let uid = unsafe { libc::getuid() };
+        let fixed_opts = if opts.contains(&"allow_other".to_string()) || uid == 0 {
             vec![]
         } else {
             vec!["-o".to_string(), "allow_root".to_string()]
@@ -116,6 +118,7 @@ impl Journal {
             .chain(opts.iter())
             .map(|s| OsStr::new(s))
             .collect();
+        debug!("fuse mount options: {:?}", &opts);
         return unsafe { fuse::spawn_mount(fs, dest, &opts) };
     }
 }
