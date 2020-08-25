@@ -91,4 +91,4 @@ if __name__ == "__main__":
             print(f"Unknown cmd: {cmd}")
             sys.exit(1)
     else:
-        subprocess.run(["recordfs", "run-suite", "--sudo", sys.argv[0]])
+        subprocess.run(["outagefs", "run-suite", "--sudo", sys.argv[0]])

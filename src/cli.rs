@@ -365,7 +365,7 @@ fn mount(opts: MountOpt) -> io::Result<i32> {
     let _ = fs::OpenOptions::new().write(true).create(true).open(&dest);
     let session = journal
         .mount(&dest, &fuse_args, filter.as_ref())
-        .context(format!("mounting recordfs to {}", dest.display()))?;
+        .context(format!("mounting outagefs to {}", dest.display()))?;
     info!("mounted: {}", dest.display());
     match exec {
         Some(cmd) => {

@@ -15,9 +15,9 @@ use std::time::UNIX_EPOCH;
 
 const BLOCK_SIZE: usize = 512;
 
-/// Fuse state for "recordfs" - a single file filesystem recording write and
+/// Fuse state for "outagefs" - a single file filesystem recording write and
 /// flush operations.
-pub struct FuseRecordFilesystem<'a> {
+pub struct FuseOutageFilesystem<'a> {
     /// The filesystem is exposed as a single file. This is its content.
     data: Vec<u8>,
 
@@ -25,7 +25,7 @@ pub struct FuseRecordFilesystem<'a> {
     changes: &'a mut Vec<Change>,
 }
 
-impl<'a> FuseRecordFilesystem<'a> {
+impl<'a> FuseOutageFilesystem<'a> {
     fn block_count(&self) -> usize {
         (self.data.len() + BLOCK_SIZE - 1) / BLOCK_SIZE
     }
@@ -54,7 +54,7 @@ impl<'a> FuseRecordFilesystem<'a> {
     }
 }
 
-impl<'a> Filesystem for FuseRecordFilesystem<'a> {
+impl<'a> Filesystem for FuseOutageFilesystem<'a> {
     fn getattr(&mut self, _req: &Request, _ino: u64, reply: ReplyAttr) {
         reply.attr(&Duration::from_secs(60), &self.attr());
     }

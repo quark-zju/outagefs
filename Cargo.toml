@@ -1,12 +1,12 @@
 [package]
-name = "recordfs"
+name = "outagefs"
 version = "0.1.0"
 authors = ["Jun Wu <quark@lihdd.net>"]
 edition = "2018"
 license = "MIT"
-description = "FUSE Filesystem to record and replay changes intended to emulate power failures."
-keywords = ["fuse"]
-repository = "https://github.com/quark-zju/recordfs"
+description = "FUSE filesystem and tools to emulate and test behaviors on power outage."
+keywords = ["fuse", "testing"]
+repository = "https://github.com/quark-zju/outagefs"
 categories = ["filesystem"]
 readme = "README.md"
 build = "build.rs"

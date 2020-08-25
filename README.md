@@ -1,14 +1,23 @@
-recordfs
+outagefs
 ========
 
-recordfs is a fuse filesystem that exposes a single fixed-sized file.
+`outagefs` provides ways to test application and filesystem behaviors on power
+outage without real power outage.
 
-Writes and syncs on that file are recorded, and can be replayed with arbitrary
-sets of writes dropped.
+It works by recording filesystem changes at the block device level, and
+replaying writes with unsynchronized writes dropped randomly. The recording is
+done by using fuse to expose a monitored file that represents the block device.
 
-This emulates power failure or hard reboot cases. It is useful to check certain
-properties of a application running on a filesystem.
+Currently, `outagefs` is mainly developed and tested on Linux.
 
+Installation
+------------
+
+`outagefs` can be installed via `cargo`:
+
+```bash
+cargo install outagefs
+```
 
 Example: "atomic rename" on ext4
 --------------------------------
@@ -34,24 +43,24 @@ sudo umount ext4root
 
 ### Record
 
-Then, use recordfs to record the write + rename operation:
+Then, use outagefs to record the write + rename operation:
 
 ```bash
 # try adding 'sync' before 'mv' if 'ext2' is used
-recordfs mount --record --sudo --exec 'mount -o loop -t ext4 $1 ext4root; seq 2 6000 > ext4root/a; mv ext4root/{a,b}; umount ext4root'
+outagefs mount --record --sudo --exec 'mount -o loop -t ext4 $1 ext4root; seq 2 6000 > ext4root/a; mv ext4root/{a,b}; umount ext4root'
 ```
 
 The above command uses `base` as the base image, mounts it as a single file with
 recording turned on, and passes that single file as `$1` to the shell script. The
 shell script mounts the file as ext4 and makes changes to the ext4 filesystem.
 Writing to the mounted ext4 filesystem gets translated to low-level write and
-sync operations to the `$1` file. The `--record` flag tells `recordfs` to write
+sync operations to the `$1` file. The `--record` flag tells `outagefs` to write
 the changes back to disk as `changes`.
 
-Let's check that recordfs does record some changes:
+Let's check that outagefs does record some changes:
 
 ```bash
-recordfs show
+outagefs show
 ```
 
 ### Verify
@@ -86,33 +95,33 @@ except Exception as ex:
 Verify the end state is good:
 
 ```bash
-recordfs mount --sudo --exec 'mount -o loop -t ext4 $1 ext4root && python3 verify.py; umount ext4root'
+outagefs mount --sudo --exec 'mount -o loop -t ext4 $1 ext4root && python3 verify.py; umount ext4root'
 # should print 'GOOD: new content'
 ```
 
 It's also good if all writes are discarded:
 
 ```bash
-recordfs mount --filter 0 --sudo --exec 'mount -o loop -t ext4 $1 ext4root && python3 verify.py; umount ext4root'
+outagefs mount --filter 0 --sudo --exec 'mount -o loop -t ext4 $1 ext4root && python3 verify.py; umount ext4root'
 # should print 'GOOD: old content'
 ```
 
 ### Generating Tests
 
 More interesting tests will be when some writes are discarded while others
-aren't.  In theory it's possible to look at `recordfs show` result and find out
+aren't.  In theory it's possible to look at `outagefs show` result and find out
 what to discard, and figure out bits as a "filter" (`1`: take, `0` or not
 mentioned: discard), and test it like:
 
 ```bash
-recordfs mount --filter 1000000001000000011 --sudo --exec 'mount -o loop -t ext4 $1 ext4root && python3 verify.py; umount ext4root'
+outagefs mount --filter 1000000001000000011 --sudo --exec 'mount -o loop -t ext4 $1 ext4root && python3 verify.py; umount ext4root'
 ```
 
 It is time consuming to figure out interesting test cases manually.
-`recordfs` provides a subcommand to generate test cases:
+`outagefs` provides a subcommand to generate test cases:
 
 ```bash
-recordfs gen-tests
+outagefs gen-tests
 ```
 
 This will print strings in the `offset:bits` form, suitable for `--filter`.
@@ -123,8 +132,8 @@ of test cases bounded so tests can complete.
 Now, let's just use the generated tests and run the verify script on them:
 
 ```bash
-for f in $(recordfs gen-tests); do
-    recordfs mount --filter $f --sudo --exec 'mount -o loop -t ext4 $1 ext4root && python3 verify.py; umount ext4root'
+for f in $(outagefs gen-tests); do
+    outagefs mount --filter $f --sudo --exec 'mount -o loop -t ext4 $1 ext4root && python3 verify.py; umount ext4root'
 done
 ```
 
@@ -137,11 +146,11 @@ The tests above might be not challenging enough. For example, individual writes
 are atomic and Sync are expected to work as expected. Hardware might have
 different properties. For example, having hardward-specific 2KB block size,
 or does not always respect Sync, or might corrupt data during writes.
-To make it easier to exercise such behaviors, `recordfs` has a `mutate`
+To make it easier to exercise such behaviors, `outagefs` has a `mutate`
 sub-command to rewrite changes:
 
 ```bash
-recordfs mutate --split-write --zero-fill --drop-sync
+outagefs mutate --split-write --zero-fill --drop-sync
 ```
 
 The `changes` file will be updated with the rewritten result.  Note that the
@@ -156,7 +165,7 @@ It is verbose and error-prone to setup, record, and run tests manually.
 The `run-script` subcommand can be use to make it easier:
 
 ```bash
-recordfs run-suite --sudo suite-examples/rename-no-fsync-ext2.py
+outagefs run-suite --sudo suite-examples/rename-no-fsync-ext2.py
 ```
 
 The above command will create a temporary directory, call the script with

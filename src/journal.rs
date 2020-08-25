@@ -104,7 +104,7 @@ impl Journal {
         filter: Option<&ChangeFilter>,
     ) -> io::Result<fuse::BackgroundSession> {
         let data = self.data(filter);
-        let fs = crate::fs::FuseRecordFilesystem::new(data, &mut self.changes);
+        let fs = crate::fs::FuseOutageFilesystem::new(data, &mut self.changes);
         // Add '-o allow_root' automatically.
         let fixed_opts = if opts.contains(&"allow_other".to_string()) {
             vec![]
