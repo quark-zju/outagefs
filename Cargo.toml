@@ -9,7 +9,12 @@ keywords = ["fuse", "testing"]
 repository = "https://github.com/quark-zju/outagefs"
 categories = ["filesystem"]
 readme = "README.md"
-build = "build.rs"
+build = "vendor/fuse/fuse-sys/build.rs"
+include = [
+  "Cargo.toml",
+  "src/**/*.rs",
+  "vendor/**/*.rs",
+]
 
 [dependencies]
 byteorder = "1"
