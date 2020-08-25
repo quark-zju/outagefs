@@ -50,6 +50,10 @@ Then, use outagefs to record the write + rename operation:
 outagefs mount --record --sudo --exec 'mount -o loop -t ext4 $1 ext4root; seq 2 6000 > ext4root/a; mv ext4root/{a,b}; umount ext4root'
 ```
 
+(If the command failed with "fusermount: option allow_other only allowed ...",
+edit /etc/fuse.conf and uncommit `user_allow_other`, or run the `outagefs`
+command under root)
+
 The above command uses `base` as the base image, mounts it as a single file with
 recording turned on, and passes that single file as `$1` to the shell script. The
 shell script mounts the file as ext4 and makes changes to the ext4 filesystem.
