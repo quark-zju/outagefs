@@ -1,8 +1,7 @@
 outagefs
 ========
 
-`outagefs` provides ways to test application and filesystem behaviors on power
-outage without real power outage.
+`outagefs` emulates power outage to test application and filesystem behaviors.
 
 It works by recording filesystem changes at the block device level, and
 replaying writes with unsynchronized writes dropped randomly. The recording is
@@ -176,3 +175,30 @@ The above command will create a temporary directory, call the script with
 `prepare` to create the `base` image, then `changes` to make changes to record,
 and eventually `verify` to verify test cases. After testing, the temporary
 directory is deleted.
+
+
+### Bisecting Tests
+
+For non-trivial changes, there are a lot of test cases. Most of the cases are
+not very interesting. Only those that are transisting from a valid old state
+to a valid new state are:
+
+```
+Test Cases: |-------------|-------------|-----------|
+State:      | Old State   | Interesting | New State |
+```
+
+It is more efficient to bisect the "Interesting" cases to find out obviously
+broken cases. The verification script can choose to return exit code in the
+10 to 19 range to indicate states. Something like:
+
+```python
+if is_good_old_state():
+    sys.exit(11)
+elif is_good_new_state():
+    sys.exit(12)
+```
+
+The `run-suite` command can use the information to bisect the test cases.
+If there is nothing to bisect, `run-suite` will run the remaining tests in
+order.
