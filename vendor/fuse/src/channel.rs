@@ -136,7 +136,7 @@ pub fn unmount(mountpoint: &Path) -> io::Result<()> {
         use crate::vendor::fuse_sys::fuse_unmount_compat22;
         use std::io::ErrorKind::PermissionDenied;
 
-        let rc = unsafe { libc::umount(mnt.as_ptr()) };
+        let rc = unsafe { libc::umount2(mnt.as_ptr(), libc::MNT_DETACH) };
         if rc < 0 && io::Error::last_os_error().kind() == PermissionDenied {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
