@@ -1,4 +1,5 @@
 use crate::errors::Context;
+use crate::vendor::fuse;
 use serde::Deserialize;
 use serde::Serialize;
 use std::ffi::OsStr;

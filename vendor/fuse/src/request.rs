@@ -9,15 +9,15 @@ use std::convert::TryFrom;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use libc::{EIO, ENOSYS, EPROTO};
-use fuse_abi::*;
-use fuse_abi::consts::*;
+use crate::vendor::fuse_abi::*;
+use crate::vendor::fuse_abi::consts::*;
 use log::{debug, error, warn};
 
-use crate::channel::ChannelSender;
-use crate::ll;
-use crate::reply::{Reply, ReplyRaw, ReplyEmpty, ReplyDirectory};
-use crate::session::{MAX_WRITE_SIZE, Session};
-use crate::Filesystem;
+use super::channel::ChannelSender;
+use super::ll;
+use super::reply::{Reply, ReplyRaw, ReplyEmpty, ReplyDirectory};
+use super::session::{MAX_WRITE_SIZE, Session};
+use super::Filesystem;
 
 /// We generally support async reads
 #[cfg(not(target_os = "macos"))]

@@ -13,9 +13,9 @@ use thread_scoped::{scoped, JoinGuard};
 use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
 use log::{error, info};
 
-use crate::channel::{self, Channel};
-use crate::request::Request;
-use crate::Filesystem;
+use super::channel::{self, Channel};
+use super::request::Request;
+use super::Filesystem;
 
 /// The max size of write requests from the kernel. The absolute minimum is 4k,
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS
