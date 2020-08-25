@@ -166,7 +166,7 @@ like `EUCLEAN` or hangs.
 ### Convenient Way to Run Tests
 
 It is verbose and error-prone to setup, record, and run tests manually.
-The `run-script` subcommand can be use to make it easier:
+The `run-suite` subcommand can be use to make it easier:
 
 ```bash
 outagefs run-suite --sudo suite-examples/rename-no-fsync-ext2.py
