@@ -310,7 +310,7 @@ fn gen_tests(mut changes: Vec<Change>, opt: &GenTestsOpt) -> Vec<String> {
             let mut visited: HashSet<String> = HashSet::new();
             while visited.len() < n {
                 // Do a few bit flips.
-                let bit_flip_count = rng.gen_range(1, width *2 / max_width);
+                let bit_flip_count = rng.gen_range(1, width * 2 / max_width);
                 for _ in 0..bit_flip_count {
                     let idx = rng.gen_range(0, width);
                     bits[idx] = !bits[idx];
@@ -338,7 +338,21 @@ fn wait_stdin() {
 
 fn execute(mut args: Vec<String>, run: &RunOpt) -> io::Result<ExitStatus> {
     if run.sudo {
-        args.insert(0, "/bin/sudo".to_string());
+        let mut sudo_path = None;
+        for path in &["/usr/bin/sudo", "/run/wrappers/bin/sudo"] {
+            if Path::new(path).exists() {
+                sudo_path = Some(path.to_string());
+            }
+        }
+        match sudo_path {
+            Some(path) => args.insert(0, path),
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "can not find sudo in common locations",
+                ))
+            }
+        }
     }
     info!("running: {}", shell_words::join(&args[..]));
     Command::new(&args[0])
