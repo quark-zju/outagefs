@@ -310,7 +310,8 @@ fn gen_tests(mut changes: Vec<Change>, opt: &GenTestsOpt) -> Vec<String> {
             let mut visited: HashSet<String> = HashSet::new();
             while visited.len() < n {
                 // Do a few bit flips.
-                for _ in 0..((width + max_width - 1) / max_width) {
+                let bit_flip_count = rng.gen_range(1, width *2 / max_width);
+                for _ in 0..bit_flip_count {
                     let idx = rng.gen_range(0, width);
                     bits[idx] = !bits[idx];
                 }
